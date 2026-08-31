@@ -1,0 +1,440 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAuthorized() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/authorizedUsers/$(request.auth.uid))
+        && get(/databases/$(database)/documents/authorizedUsers/$(request.auth.uid)).data.active == true;
+    }
+
+    function isOwner(uid) {
+      return isAuthorized() && request.auth.uid == uid;
+    }
+
+    function hasAuditKeys(d) {
+      return d.keys().hasAll(['createdAt', 'updatedAt', 'schemaVersion']);
+    }
+
+    function validAuditCreate(d) {
+      return hasAuditKeys(d)
+        && d.createdAt == request.time
+        && d.updatedAt == request.time
+        && d.schemaVersion is int
+        && d.schemaVersion >= 1
+        && d.schemaVersion <= 10;
+    }
+
+    function validAuditUpdate(d) {
+      return hasAuditKeys(d)
+        && d.createdAt == resource.data.createdAt
+        && d.updatedAt == request.time
+        && d.schemaVersion == resource.data.schemaVersion;
+    }
+
+    function validText(v, maxLength) {
+      return v is string && v.size() <= maxLength;
+    }
+
+    function validOptionalText(d, field, maxLength) {
+      return !(field in d) || validText(d[field], maxLength);
+    }
+
+    function validMoney(v) {
+      return v is number && v >= 0 && v <= 100000000;
+    }
+
+    function validSignedMoney(v) {
+      return v is number && v >= -100000000 && v <= 100000000;
+    }
+
+    function validRate(v) {
+      return v is number && v >= 0 && v <= 1;
+    }
+
+    function validDate(v) {
+      return v is timestamp;
+    }
+
+    function validProfile(d) {
+      return d.keys().hasOnly(['displayName', 'email', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && validText(d.displayName, 120)
+        && validText(d.email, 320);
+    }
+
+    function validIncome(d) {
+      return d.keys().hasOnly(['kind', 'label', 'amount', 'receivedAt', 'recurring', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['kind', 'label', 'amount', 'receivedAt', 'recurring'])
+        && d.kind in ['salary', 'electedAllowance', 'selfEmployed', 'rental', 'exceptional', 'other']
+        && validText(d.label, 160)
+        && validMoney(d.amount)
+        && validDate(d.receivedAt)
+        && d.recurring is bool;
+    }
+
+    function validExpense(d) {
+      return d.keys().hasOnly(['label', 'amount', 'category', 'subcategory', 'occurredAt', 'essential', 'fixed', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['label', 'amount', 'category', 'occurredAt', 'essential', 'fixed'])
+        && validText(d.label, 180)
+        && validMoney(d.amount)
+        && validText(d.category, 80)
+        && validOptionalText(d, 'subcategory', 80)
+        && validDate(d.occurredAt)
+        && d.essential is bool
+        && d.fixed is bool;
+    }
+
+    function validBudget(d) {
+      return d.keys().hasOnly(['period', 'category', 'targetAmount', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['period', 'category', 'targetAmount'])
+        && validText(d.period, 7)
+        && validText(d.category, 80)
+        && validMoney(d.targetAmount);
+    }
+
+    function validAccount(d) {
+      return d.keys().hasOnly(['kind', 'name', 'balance', 'liquid', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['kind', 'name', 'balance', 'liquid'])
+        && d.kind in ['cash', 'pea', 'cto', 'pel', 'livretA', 'livretJeune', 'realEstate', 'other']
+        && validText(d.name, 120)
+        && validSignedMoney(d.balance)
+        && d.liquid is bool;
+    }
+
+    function validInvestment(d) {
+      return d.keys().hasOnly(['envelope', 'ticker', 'isin', 'name', 'quantity', 'averageCost', 'currentValue', 'realizedGain', 'dividends', 'fees', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['envelope', 'name', 'quantity', 'averageCost', 'currentValue', 'realizedGain', 'dividends', 'fees'])
+        && d.envelope in ['PEA', 'CTO']
+        && validOptionalText(d, 'ticker', 32)
+        && validOptionalText(d, 'isin', 20)
+        && validText(d.name, 160)
+        && d.quantity is number && d.quantity >= 0 && d.quantity <= 1000000000
+        && validMoney(d.averageCost)
+        && validMoney(d.currentValue)
+        && validSignedMoney(d.realizedGain)
+        && validMoney(d.dividends)
+        && validMoney(d.fees);
+    }
+
+    function validAutomaticInvestment(d) {
+      return d.keys().hasOnly(['amount', 'frequency', 'day', 'envelope', 'instrument', 'priority', 'active', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['amount', 'frequency', 'day', 'envelope', 'instrument', 'priority', 'active'])
+        && validMoney(d.amount)
+        && d.frequency in ['weekly', 'monthly', 'quarterly']
+        && d.day is int && d.day >= 1 && d.day <= 31
+        && d.envelope in ['PEA', 'CTO', 'cash', 'other']
+        && validText(d.instrument, 120)
+        && d.priority is int && d.priority >= 0 && d.priority <= 10
+        && d.active is bool;
+    }
+
+    function validSnapshot(d) {
+      return d.keys().hasOnly(['period', 'grossAssets', 'debts', 'netWorth', 'income', 'expenses', 'investments', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['period', 'grossAssets', 'debts', 'netWorth', 'income', 'expenses', 'investments'])
+        && validText(d.period, 7)
+        && validMoney(d.grossAssets)
+        && validMoney(d.debts)
+        && validSignedMoney(d.netWorth)
+        && validMoney(d.income)
+        && validMoney(d.expenses)
+        && validMoney(d.investments);
+    }
+
+    function validGoal(d) {
+      return d.keys().hasOnly(['name', 'targetAmount', 'currentAmount', 'targetDate', 'priority', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['name', 'targetAmount', 'currentAmount', 'priority'])
+        && validText(d.name, 160)
+        && validMoney(d.targetAmount)
+        && validMoney(d.currentAmount)
+        && (!('targetDate' in d) || validDate(d.targetDate))
+        && d.priority is int && d.priority >= 0 && d.priority <= 10;
+    }
+
+    function validSalaryProfile(d) {
+      return d.keys().hasOnly(['contractType', 'contractStartDate', 'baseGross', 'baseNetIndicative', 'monthlyHours', 'weeklyHours', 'hourlyGrossRate', 'conventionalHourlyRate', 'classification', 'coefficient', 'status', 'collectiveAgreement', 'payDay', 'withholdingRate', 'notes', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['contractType', 'contractStartDate', 'baseGross', 'monthlyHours', 'weeklyHours', 'hourlyGrossRate', 'status', 'payDay', 'withholdingRate'])
+        && validText(d.contractType, 80)
+        && validDate(d.contractStartDate)
+        && validMoney(d.baseGross)
+        && (!('baseNetIndicative' in d) || validMoney(d.baseNetIndicative))
+        && d.monthlyHours is number && d.monthlyHours >= 0 && d.monthlyHours <= 400
+        && d.weeklyHours is number && d.weeklyHours >= 0 && d.weeklyHours <= 100
+        && validMoney(d.hourlyGrossRate)
+        && (!('conventionalHourlyRate' in d) || validMoney(d.conventionalHourlyRate))
+        && validOptionalText(d, 'classification', 100)
+        && validOptionalText(d, 'coefficient', 40)
+        && d.status in ['cadre', 'nonCadre', 'unknown']
+        && validOptionalText(d, 'collectiveAgreement', 180)
+        && d.payDay is int && d.payDay >= 1 && d.payDay <= 31
+        && validRate(d.withholdingRate)
+        && validOptionalText(d, 'notes', 1000);
+    }
+
+    function validSalaryMonth(d) {
+      return d.keys().hasOnly(['period', 'expectedNet', 'actualNet', 'withholdingRate', 'status', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['period', 'expectedNet', 'actualNet', 'withholdingRate', 'status'])
+        && validText(d.period, 7)
+        && validMoney(d.expectedNet)
+        && validMoney(d.actualNet)
+        && validRate(d.withholdingRate)
+        && d.status in ['ok', 'minorGap', 'review'];
+    }
+
+    function validPayrollCheck(d) {
+      return d.keys().hasOnly(['period', 'expectedNet', 'actualNet', 'gap', 'gapPercent', 'status', 'warning', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['period', 'expectedNet', 'actualNet', 'gap', 'gapPercent', 'status', 'warning'])
+        && validText(d.period, 7)
+        && validMoney(d.expectedNet)
+        && validMoney(d.actualNet)
+        && validSignedMoney(d.gap)
+        && d.gapPercent is number && d.gapPercent >= -1000 && d.gapPercent <= 1000
+        && d.status in ['ok', 'minorGap', 'review']
+        && validText(d.warning, 500);
+    }
+
+    function validFiscalEvent(d) {
+      return d.keys().hasOnly(['kind', 'taxYear', 'amount', 'occurredAt', 'sourceRuleVersion', 'notes', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['kind', 'taxYear', 'amount', 'occurredAt'])
+        && d.kind in ['dividend', 'interest', 'realizedGain', 'realizedLoss', 'peaWithdrawal', 'pelInterest', 'rentalIncome', 'other']
+        && d.taxYear is int && d.taxYear >= 2000 && d.taxYear <= 2100
+        && validSignedMoney(d.amount)
+        && validDate(d.occurredAt)
+        && validOptionalText(d, 'sourceRuleVersion', 80)
+        && validOptionalText(d, 'notes', 1000);
+    }
+
+    function validLossCarry(d) {
+      return d.keys().hasOnly(['originYear', 'initialAmount', 'usedAmount', 'remainingAmount', 'expiresYear', 'ruleVersion', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['originYear', 'initialAmount', 'usedAmount', 'remainingAmount', 'expiresYear', 'ruleVersion'])
+        && d.originYear is int && d.originYear >= 2000 && d.originYear <= 2100
+        && validMoney(d.initialAmount)
+        && validMoney(d.usedAmount)
+        && validMoney(d.remainingAmount)
+        && d.usedAmount <= d.initialAmount
+        && d.remainingAmount <= d.initialAmount
+        && d.expiresYear is int && d.expiresYear >= d.originYear
+        && validText(d.ruleVersion, 80);
+    }
+
+    function validProperty(d) {
+      return d.keys().hasOnly(['type', 'city', 'address', 'surface', 'purchasePrice', 'fees', 'works', 'acquisitionDate', 'currentValue', 'dpe', 'propertyTax', 'charges', 'outstandingPrincipal', 'rent', 'vacancyRate', 'insurance', 'managementFees', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['type', 'city', 'surface', 'purchasePrice', 'fees', 'works', 'currentValue', 'propertyTax', 'charges', 'outstandingPrincipal', 'rent', 'vacancyRate', 'insurance', 'managementFees'])
+        && d.type in ['primaryResidence', 'secondaryResidence', 'rental', 'purchaseProject']
+        && validText(d.city, 120)
+        && validOptionalText(d, 'address', 240)
+        && d.surface is number && d.surface >= 0 && d.surface <= 100000
+        && validMoney(d.purchasePrice)
+        && validMoney(d.fees)
+        && validMoney(d.works)
+        && (!('acquisitionDate' in d) || validDate(d.acquisitionDate))
+        && validMoney(d.currentValue)
+        && (!('dpe' in d) || d.dpe in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'unknown'])
+        && validMoney(d.propertyTax)
+        && validMoney(d.charges)
+        && validMoney(d.outstandingPrincipal)
+        && validMoney(d.rent)
+        && validRate(d.vacancyRate)
+        && validMoney(d.insurance)
+        && validMoney(d.managementFees);
+    }
+
+    function validMortgage(d) {
+      return d.keys().hasOnly(['principal', 'annualRate', 'insuranceAnnualRate', 'termMonths', 'startDate', 'monthlyPayment', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['principal', 'annualRate', 'insuranceAnnualRate', 'termMonths', 'monthlyPayment'])
+        && validMoney(d.principal)
+        && validRate(d.annualRate)
+        && validRate(d.insuranceAnnualRate)
+        && d.termMonths is int && d.termMonths >= 1 && d.termMonths <= 600
+        && (!('startDate' in d) || validDate(d.startDate))
+        && validMoney(d.monthlyPayment);
+    }
+
+    function validRentalOperation(d) {
+      return d.keys().hasOnly(['period', 'rent', 'charges', 'taxes', 'insurance', 'management', 'maintenance', 'debtService', 'taxEstimate', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['period', 'rent', 'charges', 'taxes', 'insurance', 'management', 'maintenance', 'debtService', 'taxEstimate'])
+        && validText(d.period, 7)
+        && validMoney(d.rent)
+        && validMoney(d.charges)
+        && validMoney(d.taxes)
+        && validMoney(d.insurance)
+        && validMoney(d.management)
+        && validMoney(d.maintenance)
+        && validMoney(d.debtService)
+        && validMoney(d.taxEstimate);
+    }
+
+    function validRecommendation(d) {
+      return d.keys().hasOnly(['title', 'category', 'description', 'potentialImpact', 'confidence', 'urgency', 'risk', 'reason', 'sources', 'expiresAt', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['title', 'category', 'description', 'confidence', 'urgency', 'risk', 'reason', 'sources'])
+        && validText(d.title, 180)
+        && d.category in ['tax', 'investment', 'budget', 'salary', 'realEstate', 'credit', 'cash', 'risk', 'administrative']
+        && validText(d.description, 1500)
+        && (!('potentialImpact' in d) || validSignedMoney(d.potentialImpact))
+        && d.confidence is number && d.confidence >= 0 && d.confidence <= 1
+        && d.urgency in ['low', 'medium', 'high']
+        && d.risk in ['low', 'medium', 'high']
+        && validText(d.reason, 1500)
+        && d.sources is list && d.sources.size() <= 20
+        && (!('expiresAt' in d) || validDate(d.expiresAt));
+    }
+
+    function validSettings(d) {
+      return d.keys().hasOnly(['currency', 'locale', 'emergencyFundMonths', 'salaryGapMinor', 'salaryGapReview', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['currency', 'locale', 'emergencyFundMonths', 'salaryGapMinor', 'salaryGapReview'])
+        && d.currency == 'EUR'
+        && d.locale == 'fr-FR'
+        && d.emergencyFundMonths is number && d.emergencyFundMonths >= 1 && d.emergencyFundMonths <= 24
+        && validMoney(d.salaryGapMinor)
+        && validMoney(d.salaryGapReview)
+        && d.salaryGapMinor <= d.salaryGapReview;
+    }
+
+    function validPrivacySettings(d) {
+      return d.keys().hasOnly(['hideAmountsByDefault', 'allowExternalAi', 'optionalAnalytics', 'personalizedNews', 'historyRetentionMonths', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['hideAmountsByDefault', 'allowExternalAi', 'optionalAnalytics', 'personalizedNews', 'historyRetentionMonths'])
+        && d.hideAmountsByDefault is bool
+        && d.allowExternalAi is bool
+        && d.optionalAnalytics is bool
+        && d.personalizedNews is bool
+        && (d.historyRetentionMonths == null || (d.historyRetentionMonths is int && d.historyRetentionMonths >= 1 && d.historyRetentionMonths <= 240));
+    }
+
+    function validGenericProject(d) {
+      return d.keys().hasOnly(['name', 'status', 'amount', 'notes', 'createdAt', 'updatedAt', 'schemaVersion'])
+        && d.keys().hasAll(['name', 'status', 'amount'])
+        && validText(d.name, 180)
+        && d.status in ['planned', 'active', 'paused', 'completed']
+        && validMoney(d.amount)
+        && validOptionalText(d, 'notes', 1500);
+    }
+
+    match /authorizedUsers/{uid} {
+      allow read: if isSignedIn() && request.auth.uid == uid;
+      allow create, update, delete: if false;
+    }
+
+    match /users/{uid} {
+      allow read, delete: if isOwner(uid);
+      allow create: if isOwner(uid) && validProfile(request.resource.data) && validAuditCreate(request.resource.data);
+      allow update: if isOwner(uid) && validProfile(request.resource.data) && validAuditUpdate(request.resource.data);
+
+      match /incomes/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validIncome(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validIncome(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /expenses/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validExpense(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validExpense(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /budgets/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validBudget(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validBudget(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /accounts/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validAccount(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validAccount(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /investments/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validInvestment(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validInvestment(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /automaticInvestments/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validAutomaticInvestment(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validAutomaticInvestment(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /monthlySnapshots/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validSnapshot(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validSnapshot(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /goals/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validGoal(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validGoal(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /salaryProfiles/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validSalaryProfile(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validSalaryProfile(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /salaryMonths/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validSalaryMonth(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validSalaryMonth(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /payrollChecks/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validPayrollCheck(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validPayrollCheck(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /fiscalEvents/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validFiscalEvent(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validFiscalEvent(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /taxLossCarryForwards/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validLossCarry(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validLossCarry(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /properties/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validProperty(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validProperty(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /mortgages/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validMortgage(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validMortgage(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /rentalOperations/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validRentalOperation(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validRentalOperation(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /realEstateProjects/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validGenericProject(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validGenericProject(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /recommendations/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validRecommendation(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validRecommendation(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /settings/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validSettings(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validSettings(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /privacySettings/{id} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && validPrivacySettings(request.resource.data) && validAuditCreate(request.resource.data);
+        allow update: if isOwner(uid) && validPrivacySettings(request.resource.data) && validAuditUpdate(request.resource.data);
+      }
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    // Global news/methodology content is published by trusted CI through IAM.
+    // It is intentionally unreadable until the requesting account is allowlisted.
+    match /publicContent/{document=**} {
+      allow read: if isAuthorized();
+      allow create, update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
