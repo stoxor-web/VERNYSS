@@ -9,12 +9,20 @@ const nav = [
   ['/settings/privacy/data', 'Mes données']
 ] as const;
 
+function Brand() {
+  return <button className="brand" onClick={() => navigate('/')} aria-label="Accueil VERNYSS">
+    <span className="brand-word">VERNYSS</span>
+    <span className="brand-dot" aria-hidden="true" />
+  </button>;
+}
+
 export function AppShell({ children, path }: { children: ReactNode; path: string }) {
   const { lock, signOutNow } = useAuth();
   const { hideAmounts, toggleHideAmounts } = usePrivacy();
+
   return <div className="app-shell">
     <header className="topbar">
-      <button className="brand" onClick={() => navigate('/')} aria-label="Accueil">PF<span>OS</span></button>
+      <Brand />
       <nav className="nav" aria-label="Navigation principale">
         {nav.map(([href, label]) => <button key={href} className={path === href ? 'active' : ''} onClick={() => navigate(href)}>{label}</button>)}
       </nav>
@@ -31,13 +39,18 @@ export function AppShell({ children, path }: { children: ReactNode; path: string
 
 export function PublicShell({ children }: { children: ReactNode }) {
   return <div className="public-shell">
-    <header className="public-header"><button className="brand" onClick={() => navigate('/')} aria-label="Accueil">PF<span>OS</span></button><button onClick={() => navigate('/')}>Application</button></header>
-    <main id="main-content" className="public-content">{children}</main><Footer />
+    <header className="public-header">
+      <Brand />
+      <button onClick={() => navigate('/')}>Application</button>
+    </header>
+    <main id="main-content" className="public-content">{children}</main>
+    <Footer />
   </div>;
 }
 
 function Footer() {
   const year = new Date().getFullYear();
+
   return <footer>
     <span>© {year} — Pilotage financier personnel</span>
     <span>
