@@ -49,22 +49,34 @@ interface AuthContextValue {
   unlock: () => Promise<void>;
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null);
+const AuthContext =
+  createContext<AuthContextValue | null>(null);
 
-const googleProvider = new GoogleAuthProvider();
+const googleProvider =
+  new GoogleAuthProvider();
 
 googleProvider.setCustomParameters({
   prompt: 'select_account',
 });
 
-async function checkAllowlist(user: User): Promise<boolean> {
+/**
+ * Vérifie l'autorisation applicative.
+ *
+ * L'authentification Google seule ne donne jamais accès
+ * à VERNYSS : l'utilisateur doit également exister dans
+ * authorizedUsers et avoir active === true.
+ */
+async function checkAllowlist(
+  user: User,
+): Promise<boolean> {
   const reference = doc(
     db,
     'authorizedUsers',
     user.uid,
   );
 
-  const snapshot = await getDoc(reference);
+  const snapshot =
+    await getDoc(reference);
 
   if (!snapshot.exists()) {
     return false;
@@ -75,7 +87,9 @@ async function checkAllowlist(user: User): Promise<boolean> {
   return data.active === true;
 }
 
-function getAuthErrorMessage(error: unknown): string {
+function getAuthErrorMessage(
+  error: unknown,
+): string {
   if (!(error instanceof FirebaseError)) {
     return 'Une erreur inattendue est survenue.';
   }
@@ -97,11 +111,20 @@ function getAuthErrorMessage(error: unknown): string {
       return 'La connexion Google n’est pas activée dans Firebase.';
 
     case 'auth/popup-closed-by-user':
+    case 'auth/cancelled-popup-request':
       return '';
 
     default:
       return 'Connexion impossible. Réessayez.';
   }
+}
+
+function errorKind(
+  error: unknown,
+): string {
+  return error instanceof Error
+    ? error.name
+    : 'unknown';
 }
 
 export function AuthProvider({
@@ -113,17 +136,30 @@ export function AuthProvider({
     useState<User | null>(null);
 
   const [state, setState] =
-    useState<AuthorizationState>('loading');
+    useState<AuthorizationState>(
+      'loading',
+    );
 
-  const [errorMessage, setErrorMessage] =
-    useState<string | null>(null);
+  const [
+    errorMessage,
+    setErrorMessage,
+  ] = useState<string | null>(null);
 
+  /**
+   * Synchronise Firebase Authentication avec
+   * l'autorisation interne de VERNYSS.
+   *
+   * Le callback transmis à onAuthStateChanged reste
+   * synchrone (`void`) afin de respecter l'API Firebase
+   * et les règles ESLint no-misused-promises.
+   */
   useEffect(() => {
     let cancelled = false;
 
-    const unsubscribe = onAuthStateChanged(
-      auth,
-      async (nextUser) => {
+    const handleAuthStateChange =
+      async (
+        nextUser: User | null,
+      ): Promise<void> => {
         if (cancelled) {
           return;
         }
@@ -140,7 +176,9 @@ export function AuthProvider({
 
         try {
           const allowed =
-            await checkAllowlist(nextUser);
+            await checkAllowlist(
+              nextUser,
+            );
 
           if (cancelled) {
             return;
@@ -159,10 +197,7 @@ export function AuthProvider({
           logger.error(
             'Authorization check failed',
             {
-              kind:
-                error instanceof Error
-                  ? error.name
-                  : 'unknown',
+              kind: errorKind(error),
             },
           );
 
@@ -172,8 +207,17 @@ export function AuthProvider({
 
           setState('error');
         }
-      },
-    );
+      };
+
+    const unsubscribe =
+      onAuthStateChanged(
+        auth,
+        (nextUser) => {
+          void handleAuthStateChange(
+            nextUser,
+          );
+        },
+      );
 
     return () => {
       cancelled = true;
@@ -181,112 +225,128 @@ export function AuthProvider({
     };
   }, []);
 
-  const signIn = useCallback(async () => {
-    setErrorMessage(null);
-
-    try {
-      await signInWithPopup(
-        auth,
-        googleProvider,
-      );
-    } catch (error: unknown) {
-      const message =
-        getAuthErrorMessage(error);
-
-      if (message !== '') {
-        setErrorMessage(message);
-      }
-
-      if (
-        !(
-          error instanceof FirebaseError &&
-          error.code ===
-            'auth/popup-closed-by-user'
-        )
-      ) {
-        logger.error(
-          'Google sign-in failed',
-          {
-            kind:
-              error instanceof Error
-                ? error.name
-                : 'unknown',
-          },
-        );
-      }
-    }
-  }, []);
-
-  const signOutNow =
-    useCallback(async () => {
+  const signIn =
+    useCallback(async (): Promise<void> => {
       setErrorMessage(null);
 
       try {
-        await signOut(auth);
+        await signInWithPopup(
+          auth,
+          googleProvider,
+        );
       } catch (error: unknown) {
-        logger.error(
-          'Sign-out failed',
-          {
-            kind:
-              error instanceof Error
-                ? error.name
-                : 'unknown',
-          },
-        );
+        const message =
+          getAuthErrorMessage(error);
 
-        setErrorMessage(
-          'La déconnexion a échoué. Réessayez.',
-        );
+        if (message !== '') {
+          setErrorMessage(message);
+        }
+
+        const popupWasCancelled =
+          error instanceof FirebaseError &&
+          (
+            error.code ===
+              'auth/popup-closed-by-user' ||
+            error.code ===
+              'auth/cancelled-popup-request'
+          );
+
+        if (!popupWasCancelled) {
+          logger.error(
+            'Google sign-in failed',
+            {
+              kind: errorKind(error),
+            },
+          );
+        }
       }
     }, []);
 
-  const lock = useCallback(() => {
-    if (user !== null) {
-      setState('locked');
-    }
-  }, [user]);
+  const signOutNow =
+    useCallback(
+      async (): Promise<void> => {
+        setErrorMessage(null);
 
-  const unlock =
-    useCallback(async () => {
+        try {
+          await signOut(auth);
+        } catch (error: unknown) {
+          logger.error(
+            'Sign-out failed',
+            {
+              kind: errorKind(error),
+            },
+          );
+
+          setErrorMessage(
+            'La déconnexion a échoué. Réessayez.',
+          );
+        }
+      },
+      [],
+    );
+
+  const lock =
+    useCallback((): void => {
       if (user === null) {
-        setState('signedOut');
         return;
       }
 
       setErrorMessage(null);
-
-      try {
-        await reauthenticateWithPopup(
-          user,
-          googleProvider,
-        );
-
-        const allowed =
-          await checkAllowlist(user);
-
-        setState(
-          allowed
-            ? 'authorized'
-            : 'unauthorized',
-        );
-      } catch (error: unknown) {
-        logger.error(
-          'Application unlock failed',
-          {
-            kind:
-              error instanceof Error
-                ? error.name
-                : 'unknown',
-          },
-        );
-
-        setErrorMessage(
-          'La réauthentification est nécessaire pour déverrouiller VERNYSS.',
-        );
-
-        setState('locked');
-      }
+      setState('locked');
     }, [user]);
+
+  const unlock =
+    useCallback(
+      async (): Promise<void> => {
+        if (user === null) {
+          setState('signedOut');
+          return;
+        }
+
+        setErrorMessage(null);
+
+        try {
+          await reauthenticateWithPopup(
+            user,
+            googleProvider,
+          );
+
+          const allowed =
+            await checkAllowlist(user);
+
+          setState(
+            allowed
+              ? 'authorized'
+              : 'unauthorized',
+          );
+        } catch (error: unknown) {
+          const popupWasCancelled =
+            error instanceof FirebaseError &&
+            (
+              error.code ===
+                'auth/popup-closed-by-user' ||
+              error.code ===
+                'auth/cancelled-popup-request'
+            );
+
+          if (!popupWasCancelled) {
+            logger.error(
+              'Application unlock failed',
+              {
+                kind: errorKind(error),
+              },
+            );
+          }
+
+          setErrorMessage(
+            'La réauthentification est nécessaire pour déverrouiller VERNYSS.',
+          );
+
+          setState('locked');
+        }
+      },
+      [user],
+    );
 
   const value =
     useMemo<AuthContextValue>(
@@ -311,13 +371,16 @@ export function AuthProvider({
     );
 
   return (
-    <AuthContext.Provider value={value}>
+    <AuthContext.Provider
+      value={value}
+    >
       {children}
     </AuthContext.Provider>
   );
 }
 
-export function useAuth(): AuthContextValue {
+export function useAuth():
+  AuthContextValue {
   const context =
     useContext(AuthContext);
 

@@ -4,6 +4,7 @@ import App from './App';
 import { configureAppCheck } from './firebase/appCheck';
 import { configureFirebaseClient } from './firebase/config';
 import './styles/global.css';
+import './styles/finance.css';
 
 await configureFirebaseClient();
 configureAppCheck();

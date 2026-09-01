@@ -5,23 +5,56 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist', 'coverage', '.firebase', 'node_modules'] },
+  {
+    ignores: [
+      'dist',
+      'coverage',
+      '.firebase',
+      'node_modules',
+      'eslint.config.js',
+    ],
+  },
+
   js.configs.recommended,
+
   ...tseslint.configs.recommendedTypeChecked,
+
   {
     files: ['**/*.{ts,tsx}'],
+
     languageOptions: {
       ecmaVersion: 2022,
-      globals: { ...globals.browser, ...globals.node },
-      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname }
+
+      globals: {
+        ...globals.browser,
+        ...globals.node,
+      },
+
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
-    plugins: { 'react-hooks': reactHooks, 'react-refresh': reactRefresh },
+
+    plugins: {
+      'react-hooks': reactHooks,
+      'react-refresh': reactRefresh,
+    },
+
     rules: {
       ...reactHooks.configs.recommended.rules,
-      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+
+'react-refresh/only-export-components': [
+  'warn',
+  {
+    allowConstantExport: true,
+    allowExportNames: ['useAuth', 'usePrivacy'],
+  },
+],
+
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-floating-promises': 'error',
-      '@typescript-eslint/consistent-type-imports': 'error'
-    }
-  }
+      '@typescript-eslint/consistent-type-imports': 'error',
+    },
+  },
 );

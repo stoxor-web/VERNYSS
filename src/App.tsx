@@ -7,6 +7,7 @@ import LoginPage from './pages/LoginPage';
 import UnauthorizedPage from './pages/UnauthorizedPage';
 import LockedPage from './pages/LockedPage';
 import DashboardPage from './pages/DashboardPage';
+import WealthPage from './pages/WealthPage';
 import SalaryPage from './pages/SalaryPage';
 import BudgetPage from './pages/BudgetPage';
 import InvestmentsPage from './pages/InvestmentsPage';
@@ -33,7 +34,8 @@ function PublicRoute({ path }: { path: string }) {
 
 function AuthenticatedApp({ path }: { path: string }) {
   let page = <DashboardPage />;
-  if (path === '/salary') page = <SalaryPage />;
+  if (path === '/wealth') page = <WealthPage />;
+  else if (path === '/salary') page = <SalaryPage />;
   else if (path === '/budget') page = <BudgetPage />;
   else if (path === '/investments') page = <InvestmentsPage />;
   else if (path === '/tax') page = <Suspense fallback={<LoadingModule />}><TaxPage /></Suspense>;

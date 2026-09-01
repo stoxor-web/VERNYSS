@@ -54,11 +54,11 @@ interface ExportedDocument {
 }
 
 /**
- * Transforme les valeurs Firestore en valeurs JSON sérialisables.
- *
- * Les Timestamp Firestore sont notamment convertis en dates ISO.
+ * Convertit une valeur Firestore en valeur sérialisable JSON.
  */
-function serialize(value: unknown): unknown {
+function serialize(
+  value: unknown,
+): unknown {
   if (
     value === null ||
     typeof value === 'string' ||
@@ -73,16 +73,20 @@ function serialize(value: unknown): unknown {
   }
 
   if (Array.isArray(value)) {
-    return value.map((item) => serialize(item));
+    return value.map(
+      (item) => serialize(item),
+    );
   }
 
   if (typeof value === 'object') {
-    const possibleTimestamp = value as {
-      toDate?: () => Date;
-    };
+    const possibleTimestamp =
+      value as {
+        toDate?: () => Date;
+      };
 
     if (
-      typeof possibleTimestamp.toDate === 'function'
+      typeof possibleTimestamp.toDate ===
+      'function'
     ) {
       return possibleTimestamp
         .toDate()
@@ -99,14 +103,29 @@ function serialize(value: unknown): unknown {
     );
   }
 
-  return String(value);
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  if (typeof value === 'symbol') {
+    return value.description ?? null;
+  }
+
+  if (
+    typeof value === 'undefined' ||
+    typeof value === 'function'
+  ) {
+    return null;
+  }
+
+  return null;
 }
 
 /**
- * Exporte une sous-collection appartenant à l'utilisateur.
+ * Exporte une sous-collection appartenant
+ * à l'utilisateur courant.
  *
- * La pagination évite de charger une quantité non bornée
- * de documents dans une seule requête.
+ * La pagination évite un chargement non borné.
  */
 async function exportCollection(
   uid: string,
@@ -122,12 +141,17 @@ async function exportCollection(
     ];
 
     if (cursor !== null) {
-      constraints.push(startAfter(cursor));
+      constraints.push(
+        startAfter(cursor),
+      );
     }
 
-    constraints.push(limit(250));
+    constraints.push(
+      limit(250),
+    );
 
-    const snapshot: QuerySnapshot<DocumentData> =
+    const snapshot:
+      QuerySnapshot<DocumentData> =
       await getDocs(
         query(
           collection(
@@ -143,7 +167,9 @@ async function exportCollection(
     for (const item of snapshot.docs) {
       output.push({
         id: item.id,
-        data: serialize(item.data()),
+        data: serialize(
+          item.data(),
+        ),
       });
     }
 
@@ -152,9 +178,13 @@ async function exportCollection(
     }
 
     const lastDocument =
-      snapshot.docs[snapshot.docs.length - 1];
+      snapshot.docs[
+        snapshot.docs.length - 1
+      ];
 
-    if (lastDocument === undefined) {
+    if (
+      lastDocument === undefined
+    ) {
       break;
     }
 
@@ -165,17 +195,19 @@ async function exportCollection(
 }
 
 /**
- * Construit un export RGPD JSON des données accessibles
- * à l'utilisateur courant.
- *
- * Aucun fichier n'est envoyé vers un serveur tiers.
+ * Construit l'export RGPD complet du compte.
  */
 export async function buildUserExport(
   uid: string,
 ): Promise<Record<string, unknown>> {
-  const rootDocument = await getDoc(
-    doc(db, 'users', uid),
-  );
+  const rootDocument =
+    await getDoc(
+      doc(
+        db,
+        'users',
+        uid,
+      ),
+    );
 
   const exportedCollections =
     await Promise.all(
@@ -183,23 +215,33 @@ export async function buildUserExport(
         async (name) =>
           [
             name,
-            await exportCollection(uid, name),
+            await exportCollection(
+              uid,
+              name,
+            ),
           ] as const,
       ),
     );
 
   return {
     exportVersion: 1,
-    generatedAt: new Date().toISOString(),
+
+    generatedAt:
+      new Date().toISOString(),
+
     userId: uid,
 
-    profile: rootDocument.exists()
-      ? serialize(rootDocument.data())
-      : null,
+    profile:
+      rootDocument.exists()
+        ? serialize(
+            rootDocument.data(),
+          )
+        : null,
 
-    data: Object.fromEntries(
-      exportedCollections,
-    ),
+    data:
+      Object.fromEntries(
+        exportedCollections,
+      ),
 
     note:
       'Cet export contient uniquement les données accessibles au compte courant via les règles Firestore.',
@@ -207,26 +249,28 @@ export async function buildUserExport(
 }
 
 /**
- * Génère localement le fichier JSON de l'export.
+ * Télécharge localement l'export JSON.
  *
- * L'URL Blob est temporaire et révoquée immédiatement
- * après le déclenchement du téléchargement.
+ * Aucune donnée n'est envoyée vers un service tiers.
  */
 export function downloadJsonExport(
   data: Record<string, unknown>,
 ): void {
-  const content = JSON.stringify(
-    data,
-    null,
-    2,
-  );
+  const content =
+    JSON.stringify(
+      data,
+      null,
+      2,
+    );
 
-  const blob = new Blob(
-    [content],
-    {
-      type: 'application/json;charset=utf-8',
-    },
-  );
+  const blob =
+    new Blob(
+      [content],
+      {
+        type:
+          'application/json;charset=utf-8',
+      },
+    );
 
   const url =
     URL.createObjectURL(blob);
@@ -253,11 +297,8 @@ export function downloadJsonExport(
 }
 
 /**
- * Supprime tous les documents d'une sous-collection
- * utilisateur en lots bornés.
- *
- * Firestore limite les batchs à 500 opérations :
- * on reste volontairement sous cette limite.
+ * Supprime une sous-collection utilisateur
+ * par lots inférieurs à la limite Firestore.
  */
 export async function deleteUserCollection(
   uid: string,
@@ -266,7 +307,8 @@ export async function deleteUserCollection(
   let deleted = 0;
 
   for (;;) {
-    const snapshot: QuerySnapshot<DocumentData> =
+    const snapshot:
+      QuerySnapshot<DocumentData> =
       await getDocs(
         query(
           collection(
@@ -299,12 +341,12 @@ export async function deleteUserCollection(
 }
 
 /**
- * Supprime les données financières connues de l'utilisateur.
+ * Supprime l'ensemble des données financières
+ * connues appartenant à l'utilisateur.
  *
- * Important :
- * authorizedUsers/{uid} n'est volontairement PAS supprimé ici.
- * Cette collection d'autorisation est administrée séparément
- * et le client ne doit jamais pouvoir modifier ses propres droits.
+ * authorizedUsers/{uid} n'est jamais supprimé ici :
+ * le client ne doit pas pouvoir modifier lui-même
+ * son autorisation.
  */
 export async function deleteAllUserFinancialData(
   uid: string,
@@ -312,7 +354,8 @@ export async function deleteAllUserFinancialData(
   let totalDeleted = 0;
 
   for (
-    const name of USER_DATA_COLLECTIONS
+    const name of
+    USER_DATA_COLLECTIONS
   ) {
     totalDeleted +=
       await deleteUserCollection(
@@ -322,17 +365,19 @@ export async function deleteAllUserFinancialData(
   }
 
   await deleteDoc(
-    doc(db, 'users', uid),
+    doc(
+      db,
+      'users',
+      uid,
+    ),
   );
 
   return totalDeleted;
 }
 
 /**
- * Supprime les dépenses antérieures à une date ISO YYYY-MM-DD.
- *
- * La sélection est effectuée directement côté Firestore afin
- * d'éviter de télécharger tout l'historique dans le navigateur.
+ * Supprime les dépenses antérieures
+ * à une date YYYY-MM-DD.
  */
 export async function purgeHistoricalExpensesBefore(
   uid: string,
@@ -342,16 +387,19 @@ export async function purgeHistoricalExpensesBefore(
     /^\d{4}-\d{2}-\d{2}$/;
 
   if (
-    !isoDatePattern.test(beforeIsoDate)
+    !isoDatePattern.test(
+      beforeIsoDate,
+    )
   ) {
     throw new RangeError(
       'Date de purge invalide.',
     );
   }
 
-  const cutoffDate = new Date(
-    `${beforeIsoDate}T00:00:00.000Z`,
-  );
+  const cutoffDate =
+    new Date(
+      `${beforeIsoDate}T00:00:00.000Z`,
+    );
 
   if (
     Number.isNaN(
@@ -364,12 +412,15 @@ export async function purgeHistoricalExpensesBefore(
   }
 
   const cutoffTimestamp =
-    Timestamp.fromDate(cutoffDate);
+    Timestamp.fromDate(
+      cutoffDate,
+    );
 
   let deleted = 0;
 
   for (;;) {
-    const snapshot: QuerySnapshot<DocumentData> =
+    const snapshot:
+      QuerySnapshot<DocumentData> =
       await getDocs(
         query(
           collection(
@@ -378,12 +429,17 @@ export async function purgeHistoricalExpensesBefore(
             uid,
             'expenses',
           ),
+
           where(
             'occurredAt',
             '<',
             cutoffTimestamp,
           ),
-          orderBy('occurredAt'),
+
+          orderBy(
+            'occurredAt',
+          ),
+
           limit(400),
         ),
       );
@@ -408,7 +464,8 @@ export async function purgeHistoricalExpensesBefore(
 }
 
 /**
- * Supprime uniquement l'adresse facultative d'un bien immobilier.
+ * Supprime uniquement l'adresse facultative
+ * enregistrée sur un bien immobilier.
  */
 export async function removeOptionalAddress(
   uid: string,
@@ -431,14 +488,17 @@ export async function removeOptionalAddress(
       propertyId,
     ),
     {
-      address: deleteField(),
-      updatedAt: serverTimestamp(),
+      address:
+        deleteField(),
+
+      updatedAt:
+        serverTimestamp(),
     },
   );
 }
 
 /**
- * Génère un CSV local à partir de documents Firestore.
+ * Produit un CSV local à partir de documents Firestore.
  */
 export function exportCsv(
   rows: readonly DocumentData[],
@@ -450,7 +510,8 @@ export function exportCsv(
   const keys = [
     ...new Set(
       rows.flatMap(
-        (row) => Object.keys(row),
+        (row) =>
+          Object.keys(row),
       ),
     ),
   ].sort();
@@ -461,12 +522,19 @@ export function exportCsv(
     const serialized =
       serialize(value);
 
-    const text =
-      typeof serialized === 'string'
-        ? serialized
-        : JSON.stringify(
-            serialized ?? '',
-          );
+    let text: string;
+
+    if (
+      typeof serialized ===
+      'string'
+    ) {
+      text = serialized;
+    } else {
+      text =
+        JSON.stringify(
+          serialized ?? '',
+        ) ?? '';
+    }
 
     return `"${text.replaceAll(
       '"',
@@ -474,22 +542,26 @@ export function exportCsv(
     )}"`;
   };
 
-  const header = keys
-    .map((key) =>
-      escapeCsvValue(key),
-    )
-    .join(',');
+  const header =
+    keys
+      .map(
+        (key) =>
+          escapeCsvValue(key),
+      )
+      .join(',');
 
-  const body = rows.map(
-    (row) =>
-      keys
-        .map((key) =>
-          escapeCsvValue(
-            row[key],
-          ),
-        )
-        .join(','),
-  );
+  const body =
+    rows.map(
+      (row) =>
+        keys
+          .map(
+            (key) =>
+              escapeCsvValue(
+                row[key],
+              ),
+          )
+          .join(','),
+    );
 
   return [
     header,
